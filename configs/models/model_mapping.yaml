@@ -1,0 +1,8 @@
+# Model name to config file mapping
+OceanCNN: 'configs/models/cnn_conf.yaml'
+OceanResNet: 'configs/models/resnet_conf.yaml'
+OceanTransformer: 'configs/models/transformer_conf.yaml'
+OceanPangu1: 'configs/models/pangu1_conf.yaml'
+OceanPangu2: 'configs/models/pangu2_conf.yaml'
+OceanFengwu: 'configs/models/fengwu_conf.yaml'
+

@@ -1,0 +1,19 @@
+# Pangu1 Model Configuration - 仅2D版本
+# 适配海洋流速预测任务
+input_len: 7
+output_len: 1
+in_channels: 2  # u and v components
+
+# 模型架构参数
+img_size: [240, 240]  # 输入图像大小
+patch_size: [4, 4]    # Patch大小
+embed_dim: 192        # 嵌入维度
+depths: [2, 6, 6, 2]  # 每个阶段的块数
+num_heads: [6, 12, 12, 6]  # 每个阶段的注意力头数
+window_size: [8, 8]   # 窗口大小
+
+# 训练参数
+mlp_ratio: 4.0        # MLP隐藏层维度比例
+drop_rate: 0.0        # Dropout比例
+attn_drop_rate: 0.0   # 注意力Dropout比例
+drop_path_rate: 0.2   # DropPath比例

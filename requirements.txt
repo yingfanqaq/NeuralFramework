@@ -1,0 +1,22 @@
+# Core dependencies
+torch>=1.10.0
+torchvision>=0.11.0
+numpy>=1.21.0
+h5py>=3.6.0
+einops>=0.4.0
+pyyaml>=6.0
+
+# Training utilities
+tqdm>=4.62.0
+scikit-learn>=1.0.0
+
+# Visualization
+matplotlib>=3.5.0
+cartopy>=0.20.0
+
+# Logging (optional)
+wandb>=0.12.0
+
+# Development (optional)
+jupyter>=1.0.0
+ipython>=7.30.0

@@ -1,0 +1,69 @@
+# 珠江口数据集配置
+
+model:
+  name: 'OceanPangu1'  # Options: OceanCNN, OceanResNet, OceanTransformer, OceanPangu1, OceanPangu2, OceanFengwu
+
+data:
+  name: 'ocean'      # Use ocean dataset type
+  dataset: 'pearl_river'   # For logging directory naming
+  data_path: 'datasets/data/data_pearl_river_estuary_combined.mat'
+
+  # IMPORTANT: Must specify patches_per_day for single-region data
+  patches_per_day: 1  # Pearl River Estuary is a single continuous region
+
+  # Temporal configuration
+  input_len: 7
+  output_len: 1
+
+  # Data splitting
+  train_ratio: 0.7    # 70% for training (~1278 days)
+  valid_ratio: 0.15   # 15% for validation (~274 days)
+  test_ratio: 0.15    # 15% for testing (~274 days)
+
+  # Batch configuration
+  train_batchsize: 64
+  eval_batchsize: 64
+
+  # Subset for quick testing
+  subset: False        # Set to True for quick testing
+  subset_ratio: 0.1    # Use 10% of data if subset=True
+
+  # Options: 'standardize', 'normalize', 'none'
+  normalization_mode: 'normalize'
+
+  # Data loading
+  num_workers: 4       # Number of data loading workers
+  pin_memory: True     # Pin memory for faster GPU transfer
+
+train:
+  random_seed: 42
+  cuda: True
+  # device_ids: [0, 1, 2, 3, 4, 5, 6, 7]
+  device_ids: [4, 5, 6, 7]
+  epochs: 600
+  patience: 20
+  eval_freq: 10
+  saving_best: True
+  saving_checkpoint: True
+  checkpoint_freq: 40
+
+  # Options: 'DP' (DataParallel) or 'DDP' (DistributedDataParallel)
+  distribute_mode: 'DP'  
+  local_rank: 0
+
+optimizer:
+  optimizer: 'AdamW'
+  lr: 0.0005
+  weight_decay: 0.00001
+
+scheduler:
+  scheduler: 'MultiStepLR'
+  milestones: [40, 70, 90]
+  gamma: 0.5
+
+log:
+  verbose: True
+  log: True
+  log_dir: './logs'
+  wandb: False
+  wandb_project: 'pearl_river_ocean_prediction'
