@@ -194,6 +194,27 @@ class BaseTrainer:
                 step_size=self.scheduler_args['step_size'],
                 gamma=self.scheduler_args['gamma'],
             )
+        elif self.scheduler_args['scheduler'] == 'CosineAnnealingWarmRestarts':
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+                self.optimizer,
+                T_0=self.scheduler_args['T_0'],
+                T_mult=self.scheduler_args.get('T_mult', 1),
+                eta_min=self.scheduler_args.get('eta_min', 0),
+            )
+        elif self.scheduler_args['scheduler'] == 'ReduceLROnPlateau':
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                self.optimizer,
+                mode=self.scheduler_args.get('mode', 'min'),
+                factor=self.scheduler_args.get('factor', 0.5),
+                patience=self.scheduler_args.get('patience', 10),
+                min_lr=self.scheduler_args.get('min_lr', 0),
+            )
+        elif self.scheduler_args['scheduler'] == 'CosineAnnealingLR':
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer,
+                T_max=self.scheduler_args.get('T_max', self.train_args['epochs']),
+                eta_min=self.scheduler_args.get('eta_min', 0),
+            )
         else:
             scheduler = None
             if self.scheduler_args['scheduler'] is not None:
@@ -210,7 +231,9 @@ class BaseTrainer:
     def build_data(self, **kwargs):
         if self.data_args['name'].lower() not in _dataset_dict:
             raise NotImplementedError("Dataset {} not implemented".format(self.data_args['name']))
-        dataset = _dataset_dict[self.data_args['name'].lower()](self.data_args)
+        # Pass mode to dataset if available
+        mode = self.args.get('mode', 'train')
+        dataset = _dataset_dict[self.data_args['name'].lower()](self.data_args, mode=mode)
         return dataset.train_loader, dataset.valid_loader, dataset.test_loader
 
     def process(self, **kwargs):

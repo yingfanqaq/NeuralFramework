@@ -1,6 +1,6 @@
-# Fengwu Model Configuration
+# Fengwu Model Configuration - Full Version
+# Original architecture from references_models/Fengwu_improved.py
 # 适配海洋流速预测任务的Fengwu模型配置
-# 针对240x240分辨率优化
 
 # 任务参数
 input_len: 7          # 输入帧数

@@ -4,7 +4,8 @@
 
 ## 🚀 主要特性
 
-- **多模型支持**: CNN、ResNet、Transformer三种架构
+- **多模型支持**: 支持10+种先进模型架构（CNN、Transformer、GNN等）
+- **统一模型命名**: 标准化的模型命名体系，支持多个变体和自回归版本
 - **多数据集支持**: 表层海洋数据、中层海洋数据、珠江口数据
 - **多GPU训练**: 支持DataParallel和DistributedDataParallel
 - **分离式可视化**: 训练与可视化分离，支持独立分析
@@ -78,6 +79,182 @@ NeuralFramework/
 - **时间序列**: 支持多步预测，可配置输入和输出长度
 - **空间掩码**: 支持陆地/海洋掩码，只对海洋区域计算损失
 - **归一化**: 支持标准化和min-max归一化
+
+## 🤖 支持的模型
+
+> 📖 **详细指南**：查看 [docs/MODEL_GUIDE.md](docs/MODEL_GUIDE.md) 获取完整的模型使用指南、配置说明和最佳实践。
+
+### 模型总览
+
+框架支持多种先进的海洋预测模型，采用统一的命名规范：
+
+#### 基础模型
+| 模型名称 | 类型 | 参数量 | 特点 | 推荐场景 |
+|---------|------|--------|------|----------|
+| `OceanCNN` | ConvLSTM | ~1M | 快速训练，适合入门 | 短期预测 |
+| `OceanResNet` | ResNet | ~5M | 稳定可靠 | 中期预测 |
+| `OceanTransformer` | Transformer | ~10M | 注意力机制 | 多步预测 |
+
+#### 高级模型（统一命名体系）
+
+所有高级模型支持**多个变体**和**自回归版本**：
+
+##### 1. Fuxi 系列（基于Swin-Transformer）
+| 模型名称 | 参数量 | 配置文件 | 说明 |
+|---------|--------|---------|------|
+| `Fuxi` | ~50M | `fuxi_balanced_conf.yaml` | **默认推荐版本**，平衡性能和速度 |
+| `Fuxi_Light` | ~13M | `fuxi_light_conf.yaml` | 轻量级，训练更快 |
+| `Fuxi_Full` | ~256M | `fuxi_conf.yaml` | 完整版，最高精度 |
+| `Fuxi_Auto` | ~50M | `fuxi_auto_conf.yaml` | 🔄 **自回归版本**，长期预测 |
+
+**特点**：
+- 基于Swin-Transformer架构，采用局部注意力机制
+- 支持pseudo-3D处理，可处理时空数据
+- 适合中长期预测任务
+
+**使用示例**：
+```yaml
+model:
+  name: 'Fuxi'  # 或 'Fuxi_Light', 'Fuxi_Full', 'Fuxi_Auto'
+```
+
+##### 2. NNG 系列（Neural Network on Graphs）
+| 模型名称 | 参数量 | 配置文件 | 说明 |
+|---------|--------|---------|------|
+| `NNG` | ~5M | `nng_balanced_conf.yaml` | **默认推荐版本** |
+| `NNG_Light` | ~2M | `nng_light_conf.yaml` | 轻量级，内存占用少 |
+| `NNG_Full` | ~10M | `nng_conf.yaml` | 完整版，性能最佳 |
+| `NNG_Auto` | ~5M | `nng_auto_conf.yaml` | 🔄 **自回归版本**，长期预测 |
+
+**特点**：
+- 基于图神经网络，建模空间关系
+- 支持CuGraphOps加速（GPU）
+- 支持多分辨率网格层次结构
+- 适合处理不规则空间网格
+
+**使用示例**：
+```yaml
+model:
+  name: 'NNG'  # 或 'NNG_Light', 'NNG_Full', 'NNG_Auto'
+```
+
+##### 3. OneForecast 系列（轻量级GNN）
+| 模型名称 | 参数量 | 配置文件 | 说明 |
+|---------|--------|---------|------|
+| `OneForecast` | ~5M | `oneforcast_light_conf.yaml` | **默认版本**，GPU友好 |
+| `OneForecast_Light` | ~5M | `oneforcast_light_conf.yaml` | 同上，轻量级 |
+| `OneForecast_Balanced` | ~50M | `oneforcast_balanced_conf.yaml` | 平衡版，更好的性能 |
+| `OneForecast_Auto` | ~5M | `oneforcast_auto_conf.yaml` | 🔄 **自回归版本**，长期预测 |
+
+**特点**：
+- 简化的图神经网络架构
+- 训练速度快，内存占用低
+- 适合快速原型开发和实验
+
+**使用示例**：
+```yaml
+model:
+  name: 'OneForecast'  # 或 'OneForecast_Light', 'OneForecast_Balanced', 'OneForecast_Auto'
+```
+
+##### 4. GraphCast 系列（Google DeepMind）
+| 模型名称 | 参数量 | 配置文件 | 说明 |
+|---------|--------|---------|------|
+| `GraphCast` | ~1M | `graphcast_balanced_conf.yaml` | **默认推荐版本** |
+| `GraphCast_Light` | ~200K | `graphcast_light_conf.yaml` | 轻量级，训练快速 |
+| `GraphCast_Full` | ~5M | `graphcast_full_conf.yaml` | 完整版，最佳性能 |
+| `GraphCast_Auto` | ~1M | `graphcast_auto_conf.yaml` | 🔄 **自回归版本**，长期预测 |
+
+**特点**：
+- 改编自Google DeepMind的天气预测模型
+- 多分辨率网格层次结构
+- 支持pseudo-3D处理
+- 适合全球尺度的长期预测
+
+**使用示例**：
+```yaml
+model:
+  name: 'GraphCast'  # 或 'GraphCast_Light', 'GraphCast_Full', 'GraphCast_Auto'
+```
+
+##### 5. Fengwu 系列（风乌）
+| 模型名称 | 参数量 | 配置文件 | 说明 |
+|---------|--------|---------|------|
+| `Fengwu` | ~30M | `fengwu_balanced_conf.yaml` | **默认推荐版本**，平衡性能 |
+| `Fengwu_Light` | ~15M | `fengwu_light_conf.yaml` | 轻量级，快速训练 |
+| `Fengwu_Full` | ~80M | `fengwu_full_conf.yaml` | 完整版，原始架构 |
+| `Fengwu_Auto` | ~30M | `fengwu_auto_conf.yaml` | 🔄 **自回归版本**，长期预测 |
+
+**特点**：
+- 2D+3D双路径处理架构
+- 伪3D特征提取能力强
+- 适合复杂时空预测
+- 改编自中国气象局风乌模型
+
+**使用示例**：
+```yaml
+model:
+  name: 'Fengwu'  # 或 'Fengwu_Light', 'Fengwu_Full', 'Fengwu_Auto'
+```
+
+##### 6. Pangu 系列（盘古）
+| 模型名称 | 参数量 | 配置文件 | 说明 |
+|---------|--------|---------|------|
+| `Pangu` | ~35M | `pangu_balanced_conf.yaml` | **默认推荐版本**，平衡性能 |
+| `Pangu_Light` | ~15M | `pangu_light_conf.yaml` | 轻量级，快速训练 |
+| `Pangu_Full` | ~100M | `pangu_full_conf.yaml` | 完整版，基于标准Pangu-Weather |
+| `Pangu_Auto` | ~35M | `pangu_auto_conf.yaml` | 🔄 **自回归版本**，长期预测 |
+
+**特点**：
+- 2D+3D混合处理架构
+- U-Net风格的编码器-解码器
+- 特征融合和跳跃连接
+- 改编自华为盘古气象模型（Pangu-Weather）
+
+**使用示例**：
+```yaml
+model:
+  name: 'Pangu'  # 或 'Pangu_Light', 'Pangu_Full', 'Pangu_Auto'
+```
+
+### 🔄 自回归版本说明
+
+所有`_Auto`后缀的模型都是**自回归版本**，专为长期预测设计：
+
+**工作原理**：
+- 标准模型：`[t-7:t] → [t+1]`（一次预测1步）
+- 自回归模型：`[t-7:t] → [t+1] → [t+2] → ... → [t+N]`（迭代预测N步）
+
+**关键配置**：
+```yaml
+rollout_steps: 10  # 自回归展开步数，可在推理时调整
+```
+
+**训练建议**：
+1. 使用教师强制（Teacher Forcing）初始训练
+2. 逐步增加rollout_steps（课程学习）
+3. 使用计划采样（Scheduled Sampling）微调
+4. 监控误差累积情况
+
+**适用场景**：
+- 长期预测（7天以上）
+- 多步迭代预测
+- 研究误差累积和长期稳定性
+
+### 模型选择建议
+
+根据你的需求选择合适的模型：
+
+| 场景 | 推荐模型 | 理由 |
+|------|---------|------|
+| 🚀 快速开发/原型 | `OneForecast_Light` | 参数少，训练快 |
+| ⚡ 单步预测 | `Fuxi` 或 `Fengwu` | 性能均衡 |
+| 🔮 长期预测 | `Fuxi_Auto` 或 `GraphCast_Auto` | 自回归架构 |
+| 💻 有限GPU内存 | `GraphCast_Light` 或 `NNG_Light` | 内存占用低 |
+| 🎯 最高精度 | `Fuxi_Full` 或 `Pangu_Full` | 参数多，性能好 |
+| 🌊 不规则网格 | `NNG_Full` | 图网络擅长处理 |
+| 📊 大规模数据 | `GraphCast` 或 `Pangu` | 多分辨率网格 |
+| 🌪️ 复杂时空特征 | `Fengwu_Full` | 2D+3D双路径 |
 
 ## ⚙️ 配置管理
 

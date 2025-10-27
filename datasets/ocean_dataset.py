@@ -14,6 +14,7 @@ class OceanDataset(MyDataset):
     def __init__(
         self,
         data_args,
+        mode='train',
         **kwargs
     ):
         self.logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ class OceanDataset(MyDataset):
         
         self.patches_per_day = data_args.get('patches_per_day', None)
         self.saving_path = data_args.get('saving_path', None)  # For saving normalization params
+        self.mode = mode  # 'train' or 'test'
 
         data_dir = data_args.get('data_path', '')
         train_ratio = data_args.get('train_ratio', 0.6)
@@ -46,6 +48,36 @@ class OceanDataset(MyDataset):
         self.train_ratio = train_ratio
         self.valid_ratio = valid_ratio
         self.test_ratio = test_ratio
+        
+        # Get use_old_split option (default: False)
+        # If True: try to load saved indices from data_info.pkl (if exists)
+        # If False: always generate new indices
+        use_old_split = data_args.get('use_old_split', False)
+        
+        # Try to load saved data_info if use_old_split=True and saving_path exists
+        if use_old_split and self.saving_path is not None:
+            try:
+                data_info = self.load_data_info(self.saving_path)
+                self.data_indices = data_info.get('data_indices', None)
+                if self.data_indices is not None:
+                    self.logger.info(f"✓ Loaded saved data split from {self.saving_path}/data_info.pkl")
+                    self.logger.info(f"  Train: {len(self.data_indices['train'])}, "
+                                   f"Valid: {len(self.data_indices['valid'])}, "
+                                   f"Test: {len(self.data_indices['test'])}")
+                else:
+                    self.logger.info(f"✓ data_indices not found in data_info.pkl, will generate new split")
+            except FileNotFoundError:
+                self.logger.info(f"✓ data_info.pkl not found in {self.saving_path}, will generate new split")
+                self.data_indices = None
+            except Exception as e:
+                self.logger.warning(f"⚠ Failed to load data_info.pkl: {e}, will generate new split")
+                self.data_indices = None
+        elif use_old_split and self.saving_path is None:
+            self.logger.warning(f"⚠ use_old_split=True but saving_path is None, will generate new split")
+            self.data_indices = None
+        else:
+            # use_old_split=False, generate new indices
+            self.data_indices = None
         
         train_batchsize = data_args.get('train_batchsize', 32)
         eval_batchsize = data_args.get('eval_batchsize', 32)
@@ -176,25 +208,28 @@ class OceanDataset(MyDataset):
             patch_indices = patch_indices[:n_subset]
             self.logger.info(f"Using subset: {n_subset} sequences")
 
-        # Generate indices for train/valid/test split
-        n_total = len(sequences)
-        indices = np.arange(n_total)
+        # Generate indices for train/valid/test split (only if not already loaded)
+        if self.data_indices is None:
+            n_total = len(sequences)
+            indices = np.arange(n_total)
 
-        # Split indices
-        n_train = int(n_total * self.train_ratio)
-        n_valid = int(n_total * self.valid_ratio)
+            # Split indices
+            n_train = int(n_total * self.train_ratio)
+            n_valid = int(n_total * self.valid_ratio)
 
-        train_indices = indices[:n_train]
-        valid_indices = indices[n_train:n_train+n_valid]
-        test_indices = indices[n_train+n_valid:]
+            train_indices = indices[:n_train]
+            valid_indices = indices[n_train:n_train+n_valid]
+            test_indices = indices[n_train+n_valid:]
 
-        self.data_indices = {
-            'train': train_indices,
-            'valid': valid_indices,
-            'test': test_indices
-        }
+            self.data_indices = {
+                'train': train_indices,
+                'valid': valid_indices,
+                'test': test_indices
+            }
 
-        self.logger.info(f"Data split - Train: {len(train_indices)}, Valid: {len(valid_indices)}, Test: {len(test_indices)}")
+            self.logger.info(f"Generated new data split - Train: {len(train_indices)}, Valid: {len(valid_indices)}, Test: {len(test_indices)}")
+        else:
+            self.logger.info(f"Using pre-loaded data split - Train: {len(self.data_indices['train'])}, Valid: {len(self.data_indices['valid'])}, Test: {len(self.data_indices['test'])}")
 
         # Split into X (input) and y (target)
         X = sequences[:, :self.input_len]   # (N, T_in, C, H, W)

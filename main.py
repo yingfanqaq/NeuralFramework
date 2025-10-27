@@ -1,6 +1,10 @@
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
+# Enable detailed crash reporting
+import faulthandler
+faulthandler.enable()
+
 import argparse
 from utils import set_up_logger, set_seed, load_config, get_dir_path, save_config
 from procedures.base import base_procedure

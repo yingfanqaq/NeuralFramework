@@ -1231,3 +1231,55 @@ class OceanFengwu(BaseModel):
         
         return output
 
+
+
+
+class OceanFengwuAutoregressive(OceanFengwu):
+    """Autoregressive version of OceanFengwu for long-term prediction.
+    Uses single-frame prediction and rolls out for multiple steps.
+    """
+
+    def __init__(self, args):
+        # Force single frame output for autoregressive mode
+        args_auto = dict(args)
+        args_auto["output_len"] = 1
+        super().__init__(args_auto)
+
+        self.rollout_steps = args.get("rollout_steps", 1)
+
+    def forward(self, x, rollout_steps=None):
+        """
+        Autoregressive forward pass.
+
+        Args:
+            x: [B, T_in, C, H, W] input features
+            rollout_steps: Number of autoregressive steps (default: self.rollout_steps)
+        Returns:
+            [B, rollout_steps, C, H, W] output predictions
+        """
+        if rollout_steps is None:
+            rollout_steps = self.rollout_steps
+
+        B, T_in, C, H, W = x.shape
+        predictions = []
+
+        current_input = x
+
+        for step in range(rollout_steps):
+            # Predict next frame
+            next_frame = super().forward(current_input)  # [B, 1, C, H, W]
+            predictions.append(next_frame)
+
+            # Update input: slide window and add prediction
+            if T_in > 1:
+                current_input = torch.cat([
+                    current_input[:, 1:],  # Remove oldest frame
+                    next_frame  # Add new prediction
+                ], dim=1)
+            else:
+                current_input = next_frame
+
+        # Stack predictions
+        output = torch.cat(predictions, dim=1)  # [B, rollout_steps, C, H, W]
+        return output
+

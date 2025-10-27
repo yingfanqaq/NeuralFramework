@@ -18,6 +18,8 @@ class MyDataset:
         sub_ratio=0.2,
         num_workers=0,
         pin_memory=False,
+        mode='train',
+        **kwargs
         ):
         self.train_batchsize = train_batchsize
         self.eval_batchsize = eval_batchsize

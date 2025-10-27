@@ -2,6 +2,7 @@ import os
 import torch
 import logging
 import numpy as np
+import signal
 from tqdm import tqdm
 from einops import repeat
 
@@ -50,7 +51,6 @@ class OceanTrainer(BaseTrainer):
         else:
             map_location = self.device
 
-        breakpoint()
         checkpoint = torch.load(model_path, map_location=map_location)
 
         # Handle different checkpoint formats
@@ -137,7 +137,9 @@ class OceanTrainer(BaseTrainer):
             loss_record.update({"train_loss": loss.item()}, n=1)
             pbar.set_postfix({'loss': f'{loss.item():.2e}', 'avg': f'{loss_record.loss_dict["train_loss"].avg:.2e}'})
 
-        if self.scheduler is not None:
+        # Note: ReduceLROnPlateau needs validation loss, so it's handled in process()
+        # Other schedulers step at the end of each epoch
+        if self.scheduler is not None and not isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
             self.scheduler.step()
 
         return loss_record
@@ -276,64 +278,100 @@ class OceanTrainer(BaseTrainer):
             self.logger.info(f"Resuming from epoch {self.start_epoch}")
         self.logger.info("=" * 80)
 
+        # 设置退出标志
+        interrupted = [False]
+        
+        def signal_handler(sig, frame):
+            """处理Ctrl+C信号"""
+            if not interrupted[0]:
+                self.logger.info("\n" + "=" * 80)
+                self.logger.info("⚠️  收到中断信号 (Ctrl+C)，将在当前epoch结束后退出...")
+                self.logger.info("⚠️  正在保存模型和执行最终评估，请稍候...")
+                self.logger.info("=" * 80)
+                interrupted[0] = True
+            else:
+                self.logger.info("\n再次按Ctrl+C将强制退出（不保存）")
+                raise KeyboardInterrupt
+        
+        original_handler = signal.signal(signal.SIGINT, signal_handler)
+
         best_epoch = 0
         best_val_loss = float('inf')
         counter = 0
 
-        for epoch in range(self.start_epoch, self.epochs):
-            # Train
-            train_loss_record = self.train(epoch)
-            self.logger.info(f"Epoch {epoch+1}/{self.epochs} | Train Loss: {train_loss_record.loss_dict['train_loss'].avg:.2e} | LR: {self.optimizer.param_groups[0]['lr']:.6f}")
-
-            if self.wandb:
-                import wandb
-                wandb.log({'epoch': epoch, **train_loss_record.to_dict()})
-
-            if self.saving_ckpt and (epoch + 1) % self.ckpt_freq == 0:
-                ckpt_path = os.path.join(self.saving_path, f"checkpoint_{epoch}.pth")
-                torch.save({
-                    'epoch': epoch+1,
-                    'model_state_dict': self.model.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict(),
-                    'train_loss': train_loss_record.to_dict(),
-                    'valid_metrics': None,
-                }, ckpt_path)
-                self.logger.info(f"Checkpoint saved: epoch {epoch}")
-
-            if (epoch + 1) % self.eval_freq == 0:
-                valid_loss_record = self.evaluate(split="valid")
+        try:
+            for epoch in range(self.start_epoch, self.epochs):
+                # 检查是否收到中断信号
+                if interrupted[0]:
+                    self.logger.info(f"在epoch {epoch}处中断训练")
+                    break
+                    
+                # Train
+                train_loss_record = self.train(epoch)
+                self.logger.info(f"Epoch {epoch+1}/{self.epochs} | Train Loss: {train_loss_record.loss_dict['train_loss'].avg:.2e} | LR: {self.optimizer.param_groups[0]['lr']:.6f}")
 
                 if self.wandb:
                     import wandb
-                    wandb.log({'epoch': epoch, **valid_loss_record.to_dict()})
+                    wandb.log({'epoch': epoch, **train_loss_record.to_dict()})
 
-                # Check for improvement
-                val_loss = valid_loss_record.to_dict()['valid_loss']
-                if val_loss < best_val_loss:
-                    improvement = (best_val_loss - val_loss) / best_val_loss * 100 if best_val_loss != float('inf') else 0
-                    self.logger.info(f"New best model! Improvement: {improvement:.2f}%")
-                    best_val_loss = val_loss
-                    best_epoch = epoch
-                    counter = 0
+                if self.saving_ckpt and (epoch + 1) % self.ckpt_freq == 0:
+                    ckpt_path = os.path.join(self.saving_path, f"checkpoint_{epoch}.pth")
+                    torch.save({
+                        'epoch': epoch+1,
+                        'model_state_dict': self.model.state_dict(),
+                        'optimizer_state_dict': self.optimizer.state_dict(),
+                        'train_loss': train_loss_record.to_dict(),
+                        'valid_metrics': None,
+                    }, ckpt_path)
+                    self.logger.info(f"Checkpoint saved: epoch {epoch}")
 
-                    if self.saving_best:
-                        best_model_path = os.path.join(self.saving_path, "best_model.pth")
-                        torch.save({
-                            'epoch': epoch,
-                            'model_state_dict': self.model.state_dict(),
-                            'optimizer_state_dict': self.optimizer.state_dict(),
-                            'train_loss': train_loss_record.to_dict(),
-                            'valid_metrics': valid_loss_record.to_dict(),
-                        }, best_model_path)
-                else:
-                    counter += 1
-                    if self.patience != -1 and counter >= self.patience:
-                        self.logger.info(f"Early stopping at epoch {epoch+1}")
-                        break
+                if (epoch + 1) % self.eval_freq == 0:
+                    valid_loss_record = self.evaluate(split="valid")
+
+                    if self.wandb:
+                        import wandb
+                        wandb.log({'epoch': epoch, **valid_loss_record.to_dict()})
+
+                    # Check for improvement
+                    val_loss = valid_loss_record.to_dict()['valid_loss']
+                    
+                    # ReduceLROnPlateau需要在验证后调用，传入验证损失
+                    if self.scheduler is not None and isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                        self.scheduler.step(val_loss)
+                    
+                    if val_loss < best_val_loss:
+                        improvement = (best_val_loss - val_loss) / best_val_loss * 100 if best_val_loss != float('inf') else 0
+                        self.logger.info(f"New best model! Improvement: {improvement:.2f}%")
+                        best_val_loss = val_loss
+                        best_epoch = epoch
+                        counter = 0
+
+                        if self.saving_best:
+                            best_model_path = os.path.join(self.saving_path, "best_model.pth")
+                            torch.save({
+                                'epoch': epoch,
+                                'model_state_dict': self.model.state_dict(),
+                                'optimizer_state_dict': self.optimizer.state_dict(),
+                                'train_loss': train_loss_record.to_dict(),
+                                'valid_metrics': valid_loss_record.to_dict(),
+                            }, best_model_path)
+                    else:
+                        counter += 1
+                        if self.patience != -1 and counter >= self.patience:
+                            self.logger.info(f"Early stopping at epoch {epoch+1}")
+                            break
+        
+        finally:
+            # 恢复原始信号处理器
+            signal.signal(signal.SIGINT, original_handler)
 
         # Final evaluation
         self.logger.info("=" * 80)
-        self.logger.info("Training Completed!")
+        if interrupted[0]:
+            self.logger.info("⚠️  Training Interrupted by User!")
+            self.logger.info(f"⚠️  Completed {epoch+1} epochs before interruption")
+        else:
+            self.logger.info("Training Completed!")
         self.logger.info("=" * 80)
 
         if self.saving_best and os.path.exists(os.path.join(self.saving_path, "best_model.pth")):
@@ -342,13 +380,15 @@ class OceanTrainer(BaseTrainer):
             self.logger.info(f"Loaded best model from epoch {best_epoch+1}")
 
 
-        # Save final test metrics
+        # Save final test metrics and sample predictions
         if self.saving_best:
             metrics_path = os.path.join(self.saving_path, "final_metrics.npz")
             np.savez(metrics_path,
                      valid_metrics=self.evaluate(split="valid", return_predictions=True, save_predictions=True)[0].to_dict(),
                      test_metrics=self.evaluate(split="test", return_predictions=True, save_predictions=True)[0].to_dict())
             self.logger.info(f"Saved final metrics to {metrics_path}")
+            
+            self._save_sample_train_predictions(sample_ratio=0.1)  # Save 10% of training data
 
         if self.wandb:
             import wandb
@@ -357,23 +397,56 @@ class OceanTrainer(BaseTrainer):
 
         self.logger.info("=" * 80)
 
-    def test(self):
-        """Test mode - save predictions for visualization"""
+    def test(self, train_sample_ratio=0.1):
+        """Test mode - save predictions for visualization (including train/valid/test)
+        
+        Args:
+            train_sample_ratio: float, ratio of training samples to save (default: 0.1 = 10%)
+        """
         self.logger.info("=" * 80)
         self.logger.info("Running Test Mode")
         self.logger.info("=" * 80)
+        
+        # Verify model is loaded
+        if not hasattr(self, 'model') or self.model is None:
+            raise ValueError("Model not loaded! Please provide --model_path")
+        
+        self.logger.info(f"Model loaded from: {self.args.get('model_path', 'N/A')}")
+        self.logger.info(f"Saving results to: {self.saving_path}")
 
-        # Model is already loaded in __init__ via model_path
-        # Evaluate and get predictions in one pass
-        test_loss_record, predictions_data = self.evaluate(split="test", return_predictions=True, save_predictions=True)
+        # Evaluate on all splits and save predictions
+        self.logger.info("\n" + "-" * 80)
+        self.logger.info("Evaluating and saving predictions for all splits...")
+        self.logger.info("-" * 80)
+        
+        # 1. Save validation predictions
+        self.logger.info("\n[1/3] Evaluating validation set...")
+        valid_loss_record = self.evaluate(split="valid", return_predictions=True, save_predictions=True)
+        
+        # 2. Save test predictions
+        self.logger.info("\n[2/3] Evaluating test set...")
+        test_loss_record = self.evaluate(split="test", return_predictions=True, save_predictions=True)
+        
+        # 3. Save sampled training predictions
+        self.logger.info(f"\n[3/3] Sampling and saving {train_sample_ratio*100:.0f}% of training predictions...")
+        self._save_sample_train_predictions(sample_ratio=train_sample_ratio)
 
-        # Save test metrics
-        test_metrics_path = os.path.join(self.saving_path, "test_metrics.npz")
-        np.savez(test_metrics_path, test_metrics=test_loss_record.to_dict())
-        self.logger.info(f"Saved test metrics to {test_metrics_path}")
+        # Save all metrics
+        metrics_path = os.path.join(self.saving_path, "test_metrics.npz")
+        np.savez(metrics_path, 
+                 valid_metrics=valid_loss_record[0].to_dict(),
+                 test_metrics=test_loss_record[0].to_dict())
+        self.logger.info(f"\nSaved all metrics to {metrics_path}")
 
+        self.logger.info("\n" + "=" * 80)
+        self.logger.info("✅ Test completed successfully!")
         self.logger.info("=" * 80)
-        self.logger.info("Test completed. Use visualize_ocean.py for visualization.")
+        self.logger.info("\nSaved predictions:")
+        self.logger.info(f"  - {self.saving_path}/train_predictions/  (sampled ~{train_sample_ratio*100:.0f}%)")
+        self.logger.info(f"  - {self.saving_path}/valid_predictions/  (100%)")
+        self.logger.info(f"  - {self.saving_path}/test_predictions/   (100%)")
+        self.logger.info(f"\nMetrics saved to: {metrics_path}")
+        self.logger.info("\nUse visualize.py for visualization.")
         self.logger.info("=" * 80)
 
     def _save_predictions(self, predictions_data, split):
@@ -404,3 +477,77 @@ class OceanTrainer(BaseTrainer):
         np.savez(os.path.join(pred_dir, "metadata.npz"), **metadata)
 
         self.logger.info(f"Saved {len(predictions_data['predictions'])} samples to {pred_dir}")
+
+    def _save_sample_train_predictions(self, sample_ratio=0.1):
+        """Save a subset of training predictions for visualization
+        
+        Args:
+            sample_ratio: float, ratio of training samples to save (default: 0.1 = 10%)
+        """
+        self.logger.info(f"Saving {sample_ratio*100:.0f}% of training predictions...")
+        
+        self.model.eval()
+        
+        # Containers for sampled predictions
+        all_inputs = []
+        all_predictions = []
+        all_targets = []
+        all_patch_indices = []
+        
+        # Calculate how many samples to save
+        total_samples = len(self.train_loader.dataset)
+        num_samples_to_save = int(total_samples * sample_ratio)
+        samples_saved = 0
+        
+        # Calculate sampling interval
+        sample_interval = max(1, int(1 / sample_ratio))
+        
+        with torch.no_grad():
+            for batch_idx, batch_data in enumerate(tqdm(self.train_loader, desc="Sampling train predictions")):
+                # Only process every Nth batch to get the desired ratio
+                if batch_idx % sample_interval != 0:
+                    continue
+                
+                if len(batch_data) == 3:
+                    x, y, patch_idx = batch_data
+                    patch_idx = patch_idx.numpy()
+                else:
+                    raise ValueError("Batch data must include patch_idx")
+                
+                x = x.to(self.device)
+                y = y.to(self.device)
+                
+                # Get predictions
+                _, y_pred_real = self.predict(x)
+                
+                # Denormalize targets
+                if self.dataset is not None and hasattr(self.dataset, 'denormalize_data'):
+                    y_real = self.dataset.denormalize_data(y)
+                else:
+                    y_real = y
+                
+                # Store data
+                all_inputs.append(x.cpu().numpy())
+                all_predictions.append(y_pred_real.cpu().numpy())
+                all_targets.append(y_real.cpu().numpy())
+                all_patch_indices.append(patch_idx)
+                
+                samples_saved += x.shape[0]
+                
+                # Stop when we have enough samples
+                if samples_saved >= num_samples_to_save:
+                    break
+        
+        if len(all_inputs) > 0:
+            predictions_data = {
+                'inputs': np.concatenate(all_inputs, axis=0),
+                'predictions': np.concatenate(all_predictions, axis=0),
+                'targets': np.concatenate(all_targets, axis=0),
+                'patch_indices': np.concatenate(all_patch_indices, axis=0)
+            }
+            
+            # Save using existing method
+            self._save_predictions(predictions_data, 'train')
+            self.logger.info(f"Saved {samples_saved}/{total_samples} training samples ({samples_saved/total_samples*100:.1f}%)")
+        else:
+            self.logger.warning("No training predictions were saved")
